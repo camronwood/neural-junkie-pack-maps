@@ -1,12 +1,13 @@
 # Maps pack
 
-MapsExpert geocodes places and builds walking or driving routes with the public OpenStreetMap stack (Nominatim + OSRM), then publishes interactive maps to Neural Canvas (`nj.map`).
+Geocode places and build walking or driving routes with the public OpenStreetMap stack (Nominatim + OSRM), then publish interactive maps to Neural Canvas (`nj.map`). Tools attach to **Assistant** when this pack is enabled (Composition Model can also grant them to custom experts).
 
 ## Install
 
 1. Install and enable the **Maps** pack in Settings → Domain packs.
 2. No API keys are required for the default public endpoints.
 3. Start or restart the hub so the maps sidecar comes up (`/api/maps/status`).
+4. Ask **Assistant** for directions or a map — there is no MapsExpert agent.
 
 ## Tools
 
