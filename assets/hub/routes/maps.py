@@ -106,6 +106,9 @@ def handle_post(handler: Any, path: str, body: dict, settings: dict, _pack_dir: 
     if path == "/api/maps/geocode":
         _geocode(handler, body or {}, settings)
         return
+    if path == "/api/maps/reverse":
+        _reverse(handler, body or {}, settings)
+        return
     if path == "/api/maps/route":
         _route(handler, body or {}, settings)
         return
@@ -123,7 +126,8 @@ def _geocode(handler: Any, body: dict, settings: dict) -> None:
         limit = 5
     limit = max(1, min(limit, 10))
 
-    cache_key = f"{query.lower()}|{limit}"
+    viewbox = _viewbox_param(body)
+    cache_key = f"{query.lower()}|{limit}|{viewbox}"
     with _geocode_cache_lock:
         cached = _geocode_cache.get(cache_key)
     if cached is not None:
@@ -132,16 +136,18 @@ def _geocode(handler: Any, body: dict, settings: dict) -> None:
 
     base = _settings_str(settings, "nominatim_base_url", _DEFAULT_NOMINATIM).rstrip("/")
     ua = _settings_str(settings, "maps_user_agent", _DEFAULT_UA)
-    params = urllib.parse.urlencode(
-        {
-            "q": query,
-            "format": "json",
-            "limit": str(limit),
-            "addressdetails": "0",
-        }
-    )
+    params: dict[str, str] = {
+        "q": query,
+        "format": "json",
+        "limit": str(limit),
+        "addressdetails": "0",
+    }
+    if viewbox:
+        params["viewbox"] = viewbox
+        params["bounded"] = "0"
+    params_qs = urllib.parse.urlencode(params)
     _throttle(settings)
-    status, data = _http_get_json(f"{base}/search?{params}", ua)
+    status, data = _http_get_json(f"{base}/search?{params_qs}", ua)
     if status == 429:
         _json_response(handler, 429, {"error": "Nominatim rate limit exceeded; retry shortly"})
         return
@@ -180,6 +186,91 @@ def _geocode(handler: Any, body: dict, settings: dict) -> None:
             _geocode_cache.clear()
         _geocode_cache[cache_key] = payload
     _json_response(handler, 200, payload)
+
+
+def _viewbox_param(body: dict) -> str:
+    raw = body.get("viewbox")
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    near = body.get("near")
+    if not isinstance(near, dict):
+        return ""
+    try:
+        lat = float(near.get("lat"))
+        lon = float(near.get("lon", near.get("lng")))
+    except (TypeError, ValueError):
+        return ""
+    # ~15km box to bias Nominatim without hard-bounding the query.
+    delta = 0.15
+    min_lon = max(-180.0, lon - delta)
+    max_lon = min(180.0, lon + delta)
+    min_lat = max(-90.0, lat - delta)
+    max_lat = min(90.0, lat + delta)
+    return f"{min_lon},{max_lat},{max_lon},{min_lat}"
+
+
+def _reverse(handler: Any, body: dict, settings: dict) -> None:
+    try:
+        lat = float(body.get("lat"))
+        lon = float(body.get("lon", body.get("lng")))
+    except (TypeError, ValueError):
+        _json_response(handler, 400, {"error": "lat and lon are required numbers"})
+        return
+    if lat < -90 or lat > 90 or lon < -180 or lon > 180:
+        _json_response(handler, 400, {"error": "lat/lon out of range"})
+        return
+
+    base = _settings_str(settings, "nominatim_base_url", _DEFAULT_NOMINATIM).rstrip("/")
+    ua = _settings_str(settings, "maps_user_agent", _DEFAULT_UA)
+    params = urllib.parse.urlencode(
+        {
+            "lat": f"{lat:.7f}",
+            "lon": f"{lon:.7f}",
+            "format": "json",
+            "zoom": "14",
+            "addressdetails": "1",
+        }
+    )
+    _throttle(settings)
+    status, data = _http_get_json(f"{base}/reverse?{params}", ua)
+    if status == 429:
+        _json_response(handler, 429, {"error": "Nominatim rate limit exceeded; retry shortly"})
+        return
+    if status >= 400:
+        err = data.get("error") if isinstance(data, dict) else None
+        _json_response(handler, status if status < 600 else 502, {"error": err or f"reverse geocode failed ({status})"})
+        return
+    if not isinstance(data, dict):
+        _json_response(handler, 502, {"error": "unexpected Nominatim reverse response"})
+        return
+    display = str(data.get("display_name") or "").strip()
+    addr = data.get("address") if isinstance(data.get("address"), dict) else {}
+    city = ""
+    if isinstance(addr, dict):
+        city = str(
+            addr.get("city")
+            or addr.get("town")
+            or addr.get("village")
+            or addr.get("hamlet")
+            or addr.get("county")
+            or ""
+        ).strip()
+        region = str(addr.get("state") or addr.get("region") or "").strip()
+        country = str(addr.get("country") or "").strip()
+        parts = [p for p in (city, region, country) if p]
+        if parts and not display:
+            display = ", ".join(parts)
+    _json_response(
+        handler,
+        200,
+        {
+            "lat": lat,
+            "lon": lon,
+            "display_name": display or f"{lat:.5f}, {lon:.5f}",
+            "city": city,
+            "attribution": _DEFAULT_ATTRIBUTION,
+        },
+    )
 
 
 def _normalize_mode(mode: str) -> str:

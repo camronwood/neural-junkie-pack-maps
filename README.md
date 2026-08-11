@@ -1,6 +1,6 @@
 # Neural Junkie — Maps pack
 
-MapsExpert geocodes places and builds walking/driving routes with OpenStreetMap (Nominatim + OSRM), then publishes interactive maps to Neural Canvas (`nj.map`).
+Maps tools geocode places and build walking/driving routes with OpenStreetMap (Nominatim + OSRM), then publish interactive maps to Neural Canvas (`nj.map`). Device location is an optional sensitive capability (`maps_locate` + composer share).
 
 ## Install
 

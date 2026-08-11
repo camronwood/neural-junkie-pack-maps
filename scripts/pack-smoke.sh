@@ -49,5 +49,13 @@ route = post("/api/maps/route", {
 })
 assert route.get("geometry", {}).get("coordinates"), "missing route geometry"
 assert float(route.get("distance_m") or 0) > 0, "distance_m expected"
-print("OK maps smoke", round(float(route["distance_m"])), "m", route.get("mode"))
+rev = post("/api/maps/reverse", {"lat": a["lat"], "lon": a["lon"]})
+assert rev.get("display_name"), "reverse geocode missing display_name"
+biased = post("/api/maps/geocode", {
+    "query": "coffee",
+    "limit": 1,
+    "near": {"lat": a["lat"], "lon": a["lon"]},
+})
+assert biased.get("results"), "biased geocode empty"
+print("OK maps smoke", round(float(route["distance_m"])), "m", route.get("mode"), rev.get("display_name", "")[:48])
 PY
